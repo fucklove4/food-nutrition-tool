@@ -432,19 +432,29 @@ export function computeProfile({ sex, height, weight, age, activity, goal }) {
     ? 10 * weight + 6.25 * height - 5 * age + 5
     : 10 * weight + 6.25 * height - 5 * age - 161;
   const tdee = bmr * activity;
-  let targetKcal, kcalNote;
-  if (goal === 'cut') { targetKcal = tdee * 0.8; kcalNote = '减脂：约为每日消耗的 80%（温和缺口，保留肌肉）。'; }
-  else { targetKcal = tdee * 1.1; kcalNote = '增肌：约为每日消耗的 110%（小幅盈余，减少脂肪堆积）。'; }
+  let targetKcal, kcalNote, goalFactor;
+  if (goal === 'cut') {
+    goalFactor = 0.8;
+    targetKcal = tdee * goalFactor;
+    kcalNote = '减脂：约为每日消耗的 80%（温和缺口，保留肌肉）。';
+  } else {
+    goalFactor = 1.1;
+    targetKcal = tdee * goalFactor;
+    kcalNote = '增肌：约为每日消耗的 110%（小幅盈余，减少脂肪堆积）。';
+  }
   if (bmiClass === 'low' && goal === 'cut') {
     kcalNote += ' ⚠ 你的 BMI 已偏低，不建议继续减脂，请优先考虑增重或维持。';
   }
-  /* 蛋白质：减脂期提高蛋白以保住肌肉（1.8–2.0 g/kg）；
-     增肌期 1.6 g/kg 偏低，且会让剩余热量过多地压在碳水/脂肪上，
-     与主流建议（1.6–2.2 g/kg）和实际可执行的饮食都不符，故取 1.8。 */
+  /* 蛋白质：减脂期提高蛋白以保住肌肉；增肌期 1.6 g/kg 偏低，
+     且会让剩余热量过多地压在碳水/脂肪上，与主流建议（1.6–2.2 g/kg）
+     和实际可执行的饮食都不符，故两个目标统一取 1.8。 */
   const proteinPerKg = 1.8;
   const split = goal === 'cut' ? { p: 0.32, f: 0.26, c: 0.42 } : { p: 0.28, f: 0.27, c: 0.45 };
+  /* 供界面「这些数字怎么算的？」折叠区展示，避免文案与计算脱节 */
+  const splitLabel = `碳水 ${Math.round(split.c * 100)}% / 脂肪 ${Math.round(split.f * 100)}% / 蛋白 ${Math.round(split.p * 100)}%`;
   return {
     bmi, bmiTag, bmiAdvice, bmiClass, bmr, tdee, targetKcal, kcalNote,
+    goalFactor, splitLabel,
     proteinTarget: weight * proteinPerKg, proteinPerKg,
     carbG: targetKcal * split.c / 4, fatG: targetKcal * split.f / 9, split
   };

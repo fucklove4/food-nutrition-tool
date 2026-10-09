@@ -51,7 +51,10 @@ async function getAIAdvice(prompt) {
   const data = await res.json();
   return data.choices?.[0]?.message?.content || '（AI 未返回内容）';
 }
-/* ── 摘要卡 ── */
+/* ── 摘要卡 ──
+   主视图只保留「结论」：BMI + 四个目标数字。
+   基础代谢/每日消耗等推导过程放进「这些数字怎么算的？」折叠区，
+   避免卡片一上来就堆一大段说明。 */
 function renderSummary(p) {
   $('bmiVal').textContent = p.bmi.toFixed(1);
   const tag = $('bmiTag');
@@ -68,9 +71,15 @@ function renderSummary(p) {
   $('macroGrid').innerHTML = items.map(i =>
     `<div class="macro"><b>${i.v}</b><span>${i.l}</span></div>`).join('');
 
-  $('energyNote').textContent =
-    `基础代谢 ${Math.round(p.bmr)} kcal · 每日消耗 ${Math.round(p.tdee)} kcal。${p.kcalNote}` +
-    ` 蛋白质按 ${p.proteinPerKg} g/kg 体重计。`;
+  /* 推导过程写进折叠区，数字来源仍可追溯 */
+  $('calcDetail').innerHTML =
+    `<li>基础代谢（Mifflin-St Jeor）：男 = 10×体重 + 6.25×身高 − 5×年龄 + 5；女 = 同式 − 161
+         → 你的基础代谢 <b>${Math.round(p.bmr)} kcal</b></li>
+     <li>每日消耗 = 基础代谢 × 活动系数 → 你的每日消耗 <b>${Math.round(p.tdee)} kcal</b></li>
+     <li>目标热量 = 每日消耗 × ${p.goalFactor} → <b>${Math.round(p.targetKcal)} kcal</b>
+         ${p.kcalNote}</li>
+     <li>蛋白质 = ${p.proteinPerKg} g/kg × 体重 → <b>${Math.round(p.proteinTarget)} g</b></li>
+     <li>碳水和脂肪按目标热量的比例拆分（${p.splitLabel}）</li>`;
 }
 
 /* ── 食物卡 ── */

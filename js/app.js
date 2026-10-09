@@ -19,7 +19,8 @@ import {
 
 const state = {
   foods: [], sex: 'male', goal: 'cut', activity: 1.55,
-  profile: null, buckets: null, tab: 'veg', expanded: false
+  profile: null, buckets: null, tab: 'veg', expanded: false,
+  collapsed: new Set()        // 已折叠的分栏，键为 "tab:section"
 };
 
 const $ = (id) => document.getElementById(id);
@@ -207,9 +208,14 @@ const TABS = [
   { key: 'staple', label: '主食薯类' }
 ];
 
-/* 按功能/部位分栏渲染（蛋白按来源，蔬菜按部位，水果按类别，主食按谷物） */
+/* 按功能/部位分栏渲染（蛋白按来源，蔬菜按部位，水果按类别，主食按谷物）。
+   每个分栏可折叠：折叠状态存在 state.collapsed（键为 tab:section），
+   这样切换标签页或重新渲染时折叠状态不会丢。 */
 /* 奶类条目高度相似（各种牛奶/奶粉），单独限流以免刷屏 */
 const SLOT_LIMIT = { dairy: 4 };
+
+const secKey = (tab, k) => `${tab}:${k}`;
+const isCollapsed = (tab, k) => state.collapsed.has(secKey(tab, k));
 
 function renderSections(list, tab, perSection) {
   const defs = GROUPS[tab] || [];
@@ -224,11 +230,27 @@ function renderSections(list, tab, perSection) {
   const labelOf = (k) => (defs.find(d => d.key === k) || {}).label || '其他';
 
   return [...keys, ...extra].map(k => {
+    const collapsed = isCollapsed(tab, k);
     const cap = state.expanded ? 999 : Math.min(perSection, SLOT_LIMIT[k] || perSection);
     const items = groups[k].slice(0, cap);
-    return `<h3 class="sect">${labelOf(k)}
-        <span class="muted small">共 ${groups[k].length} 种</span></h3>
-      ${items.map(foodCard).join('')}`;
+    const more = groups[k].length - items.length;
+
+    const head = `<button type="button" class="sect-toggle${collapsed ? ' collapsed' : ''}"
+        data-sec="${escapeHtml(secKey(tab, k))}" aria-expanded="${!collapsed}">
+        <span class="st-left">
+          <span class="chev">▼</span>
+          <span>${labelOf(k)}</span>
+        </span>
+        <span class="st-count">${groups[k].length} 种${collapsed ? '' : ''}</span>
+      </button>`;
+
+    /* 折叠时只留标题，连卡片 DOM 都不生成，长列表滚动更轻快 */
+    if (collapsed) return head;
+
+    const body = `<div class="sect-body">${items.map(foodCard).join('')}
+      ${more > 0 ? `<p class="small muted" style="margin:2px 0 0">还有 ${more} 种，见下方「显示全部」</p>` : ''}
+    </div>`;
+    return head + body;
   }).join('');
 }
 
@@ -311,6 +333,45 @@ function renderSearch() {
   }
   html += shown.map(f => foodCard(enrich(f))).join('');
   box.innerHTML = html;
+}
+
+/* ════════════ 功能总览 ════════════
+   作品集里第一眼要能看清"这工具能做什么"，
+   所以把六项能力做成可点击的概览，点了直接跳到对应功能区。 */
+const FEATURES = [
+  { icon: '📊', title: '营养画像', desc: 'BMI、每日热量与三大营养素目标', target: 'summaryCard', needsInput: true },
+  { icon: '🍽', title: '食材推荐', desc: '按目标推荐，含优缺点与注意', target: 'recCard', needsInput: true },
+  { icon: '📅', title: '一日三餐', desc: '三餐 + 加餐，精确到克数', target: 'mealCard', needsInput: true },
+  { icon: '🔍', title: '食物搜索', desc: '1,677 种食物，支持拼音首字母', target: 'searchCard' },
+  { icon: '⭐', title: '收藏与历史', desc: '本地保存，可分享分析链接', target: 'historyCard' },
+  { icon: '🤖', title: 'AI 建议', desc: '营养师视角的个性化点评', target: 'summaryCard', needsInput: true, ai: true }
+];
+
+function renderFeatures() {
+  const ready = !!state.profile;
+  $('featGrid').innerHTML = FEATURES.map((f, i) => {
+    const pending = f.needsInput && !ready;
+    return `<button type="button" class="feat${pending ? ' needs-input' : ''}"
+        data-goto="${f.target}" data-feat="${i}">
+        <span class="feat-ico">${f.icon}</span>
+        <span class="feat-txt">
+          <b>${f.title}</b>
+          <span>${pending ? '填好身体数据后可用' : f.desc}</span>
+        </span>
+      </button>`;
+  }).join('');
+}
+
+/* 滚动到目标区域并短暂高亮，让用户知道跳到了哪里 */
+function jumpTo(id) {
+  const el = $(id);
+  if (!el || el.classList.contains('hidden')) return false;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.classList.remove('flash');
+  void el.offsetWidth;              // 重启动画
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1000);
+  return true;
 }
 
 /* ════════════ 收藏 / 历史 / 分享 ════════════ */
@@ -516,6 +577,50 @@ function bind() {
     renderRecs();
   });
 
+  /* ── 分栏折叠 ── */
+  $('recList').addEventListener('click', (e) => {
+    const t = e.target.closest('.sect-toggle');
+    if (!t) return;
+    const key = t.dataset.sec;
+    if (state.collapsed.has(key)) state.collapsed.delete(key);
+    else state.collapsed.add(key);
+    renderRecs();
+  });
+
+  /* 全部折叠 / 展开（作用于当前标签页的所有分栏） */
+  const allSectionKeys = () => {
+    const defs = GROUPS[state.tab] || [];
+    return defs.map(d => secKey(state.tab, d.key));
+  };
+  $('collapseAll').addEventListener('click', () => {
+    allSectionKeys().forEach(k => state.collapsed.add(k));
+    renderRecs();
+  });
+  $('expandAll').addEventListener('click', () => {
+    allSectionKeys().forEach(k => state.collapsed.delete(k));
+    renderRecs();
+  });
+
+  /* ── 功能总览跳转 ── */
+  $('featGrid').addEventListener('click', (e) => {
+    const btn = e.target.closest('.feat');
+    if (!btn) return;
+    const feat = FEATURES[+btn.dataset.feat];
+    if (feat.needsInput && !state.profile) {
+      toast('请先在步骤 1 填写身体数据并点「开始分析」');
+      jumpTo('formCard');
+      return;
+    }
+    /* 收藏/历史卡默认隐藏，没内容时给个说明 */
+    if (!jumpTo(btn.dataset.goto)) {
+      toast('这里还没有内容 —— 先去搜索食物或做一次分析');
+      return;
+    }
+    if (feat.ai && $('aiAdvice').classList.contains('hidden')) {
+      toast('AI 建议在分析后生成，若后端未启动会提示失败');
+    }
+  });
+
   /* ── 收藏：事件委托，推荐列表与搜索结果共用 ── */
   document.addEventListener('click', (e) => {
     const fav = e.target.closest('.fav-btn');
@@ -640,6 +745,7 @@ function bind() {
     addHistory(compactEntry(profile, state.goal, form));
     saveLastProfile(form);
     renderHistory();
+    renderFeatures();          // 分析完成后，功能总览里"待填写"的提示换成实际描述
 
     /* 新的画像 → 旧的配餐作废，避免与当前目标不符 */
     $('planResult').classList.add('hidden');
@@ -677,6 +783,7 @@ function bind() {
 /* ── 启动 ── */
 (async function main() {
   bind();
+  renderFeatures();
   renderHistory();
   renderFavorites();
 

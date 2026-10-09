@@ -83,6 +83,15 @@
     <button type="button" id="clearFavBtn" class="ghost">清空收藏</button>
   </section>
 
+  <!-- ── 功能总览：让人一眼看到这个工具能做什么 ── -->
+  <section class="card" id="featureNav">
+    <h2><span class="step">✦</span>这个工具能做什么</h2>
+    <div class="feat-grid" id="featGrid"></div>
+    <p class="small muted" style="margin:10px 0 0">
+      点任意一项可跳转到对应功能。全部计算在本地完成，<b>数据不上传</b>。
+    </p>
+  </section>
+
   <!-- ── 食物搜索（随时可用，不依赖上面的表单） ── -->
   <section class="card" id="searchCard">
     <h2><span class="step">🔍</span>查任意食物</h2>
@@ -140,10 +149,14 @@
       </details>
     </div>
 
-    <div class="card">
+    <div class="card" id="recCard">
       <h2><span class="step">3</span>推荐食材</h2>
       <p class="small muted" id="recIntro"></p>
-      <div class="tabs" id="tabs" role="tablist"></div>
+      <div id="tabs" class="tabs" role="tablist"></div>
+      <div class="rec-tools">
+        <button type="button" id="collapseAll">全部折叠</button>
+        <button type="button" id="expandAll">全部展开</button>
+      </div>
       <div id="recList" class="rec-list"></div>
       <button type="button" id="more" class="ghost hidden">显示全部</button>
     </div>

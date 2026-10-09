@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<title>食物营养分析工具</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>食物营养分析</h1>
+  <p class="sub">基于《中国食物成分表标准版(第6版)》· 1,677 种食物</p>
+</header>
+
+<main>
+  <!-- ── 步骤 1：身体数据 ── -->
+  <section class="card" id="formCard">
+    <h2><span class="step">1</span>填写身体数据</h2>
+
+    <div class="field">
+      <label for="sex">性别</label>
+      <div class="segmented" id="sex" role="group" aria-label="性别">
+        <button type="button" class="seg active" data-val="male">男</button>
+        <button type="button" class="seg" data-val="female">女</button>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="height">身高<span class="unit">cm</span></label>
+        <input type="number" id="height" inputmode="decimal" placeholder="170" min="120" max="230" step="0.5">
+      </div>
+      <div class="field">
+        <label for="weight">体重<span class="unit">kg</span></label>
+        <input type="number" id="weight" inputmode="decimal" placeholder="65" min="25" max="250" step="0.5">
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="age">年龄<span class="unit">岁</span></label>
+        <input type="number" id="age" inputmode="numeric" placeholder="28" min="18" max="100" step="1">
+      </div>
+      <div class="field">
+        <label for="activity">活动量</label>
+        <select id="activity">
+          <option value="1.2">久坐（几乎不运动）</option>
+          <option value="1.375">轻度（每周 1–3 次）</option>
+          <option value="1.55" selected>中度（每周 3–5 次）</option>
+          <option value="1.725">高强度（每周 6–7 次）</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>目标</label>
+      <div class="segmented" id="goal" role="group" aria-label="目标">
+        <button type="button" class="seg active" data-val="cut">减脂</button>
+        <button type="button" class="seg" data-val="bulk">增肌</button>
+      </div>
+    </div>
+
+    <button type="button" id="go" class="primary">开始分析</button>
+    <div class="row-2">
+      <button type="button" id="shareBtn" class="ghost">分享我的分析</button>
+      <button type="button" id="resetBtn" class="ghost">清空表单</button>
+    </div>
+    <p class="hint" id="formMsg" role="status"></p>
+  </section>
+
+  <!-- ── 历史记录 ── -->
+  <section class="card hidden" id="historyCard">
+    <h2><span class="step">↺</span>历史记录</h2>
+    <p class="small muted">只存在你自己的浏览器里，不会上传。点任意一条可重新分析。</p>
+    <div id="historyList" class="mini-list"></div>
+    <button type="button" id="clearHistoryBtn" class="ghost">清空历史</button>
+  </section>
+
+  <!-- ── 我的收藏 ── -->
+  <section class="card hidden" id="favCard">
+    <h2><span class="step">★</span>我的收藏</h2>
+    <div id="favList" class="rec-list"></div>
+    <button type="button" id="clearFavBtn" class="ghost">清空收藏</button>
+  </section>
+
+  <!-- ── 食物搜索（随时可用，不依赖上面的表单） ── -->
+  <section class="card" id="searchCard">
+    <h2><span class="step">🔍</span>查任意食物</h2>
+    <div class="field">
+      <label for="searchInput" class="sr-only">搜索食物</label>
+      <input type="search" id="searchInput" placeholder="输入食物名，如 鸡蛋、西红柿、鸡胸肉（支持拼音首字母 jxpr）"
+             autocomplete="off" enterkeyhint="search">
+    </div>
+    <p class="small muted" id="searchMeta"></p>
+    <div id="searchResults" class="rec-list"></div>
+  </section>
+
+  <!-- ── 步骤 2：结果 ── -->
+  <section id="result" class="hidden">
+
+    <div class="card" id="summaryCard">
+      <h2><span class="step">2</span>你的营养画像</h2>
+      <div class="bmi-row">
+        <div class="bmi-box">
+          <span class="bmi-num" id="bmiVal">—</span>
+          <span class="bmi-label">BMI</span>
+        </div>
+        <div class="bmi-info">
+          <span class="tag" id="bmiTag">—</span>
+          <p id="bmiAdvice" class="small"></p>
+        </div>
+      </div>
+      <div class="macros" id="macroGrid"></div>
+      <p class="small muted" id="energyNote"></p>
+      <div id="aiAdvice" class="ai-box hidden"></div>
+      <details class="why">
+        <summary>这些数字怎么算的？</summary>
+        <ul class="small">
+          <li><b>BMI</b> = 体重(kg) ÷ 身高(m)²；中国成人标准：偏瘦 &lt;18.5，正常 18.5–23.9，超重 24–27.9，肥胖 ≥28。</li>
+          <li><b>基础代谢</b>（Mifflin-St Jeor）：男 = 10×体重 + 6.25×身高 − 5×年龄 + 5；女 = 同式 − 161。</li>
+          <li><b>每日消耗</b> = 基础代谢 × 活动系数。</li>
+          <li><b>目标热量</b>：减脂 = 消耗 × 0.8；增肌 = 消耗 × 1.1。</li>
+          <li><b>蛋白质目标</b>：减脂 1.8 g/kg 体重；增肌 1.6 g/kg 体重。</li>
+        </ul>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">3</span>推荐食材</h2>
+      <p class="small muted" id="recIntro"></p>
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <div id="recList" class="rec-list"></div>
+      <button type="button" id="more" class="ghost hidden">显示全部</button>
+    </div>
+
+    <div class="card" id="mealCard">
+      <h2><span class="step">4</span>一日三餐</h2>
+      <p class="small muted">
+        按你的目标热量与蛋白需求，把一天拆成三餐 + 加餐，
+        并为每餐配好食材与克数。份量随目标热量自动缩放 —— 增肌吃到 3000+ kcal、
+        减脂吃到 1400 kcal，份量会明显不同。
+      </p>
+      <button type="button" id="planBtn" class="primary">生成配餐</button>
+      <div id="planResult" class="hidden"></div>
+    </div>
+
+    <div class="card legend">
+      <h3>标签说明</h3>
+      <p class="small">
+        <span class="pill good">高蛋白</span>
+        <span class="pill good">高纤维</span>
+        <span class="pill good">低热量密度</span>
+        <span class="pill good">低脂</span>
+        <span class="pill good">低钠</span>
+        <span class="pill warn">高钠</span>
+        <span class="pill warn">高胆固醇</span>
+        <span class="pill warn">高饱和脂肪风险</span>
+        <span class="pill warn">高热量密度</span>
+      </p>
+      <p class="small muted">
+        「优点 / 注意」由本数据集里的营养成分按阈值推导，<b>不是</b>原书内容（原书无此字段）。
+        阈值取自本数据集实际分布：高蛋白 ≥20 g/100g、高纤维 ≥6 g、低钠 ≤120 mg、高钠 &gt;600 mg、
+        高胆固醇 &gt;300 mg、高热量密度 &gt;400 kcal、低热量密度 &lt;100 kcal。
+      </p>
+    </div>
+  </section>
+
+  <p class="disclaimer small">
+    数据来源：《中国食物成分表标准版(第6版)》能量和食物一般营养成分部分，经视觉模型识别转换，
+    可能存在识别误差。本工具仅供饮食参考，<b>不能替代医疗建议</b>；如有疾病（糖尿病、高血压、肾病等）请遵医嘱。
+    表中数值均为<b>每 100 g 可食部</b>。
+  </p>
+</main>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

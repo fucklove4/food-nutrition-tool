@@ -1,0 +1,618 @@
+/* ════════════════════════════════════════════════════════════
+   app.js — 界面层
+   计算逻辑全部来自 rules.js（同一份代码在 Node 里做过验证）
+   链路：输入身体数据 → BMI / 热量·蛋白目标 → 推荐食材
+   数据：data/foods.json（每 100 g 可食部）
+   ════════════════════════════════════════════════════════════ */
+import {
+  TH, SERVING, foodType, derive, score, isProteinSource,
+  isVeg, isFruit, isStaple, recommend, computeProfile, GROUPS, groupKeyOf,
+  searchFoods, searchFacets
+} from './rules.js';
+import { buildDayPlan } from './planner.js';
+import {
+  getHistory, addHistory, removeHistory, clearHistory,
+  getFavorites, isFavorite, toggleFavorite, clearFavorites,
+  compactEntry, saveLastProfile, getLastProfile,
+  readShareFromHash, buildShareUrl
+} from './store.js';
+
+const state = {
+  foods: [], sex: 'male', goal: 'cut', activity: 1.55,
+  profile: null, buckets: null, tab: 'veg', expanded: false
+};
+
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 0) => (v == null ? '—' : Number(v).toFixed(d).replace(/\.0+$/, ''));
+/* ── AI 调用 ──
+   部署后把 PROD_API 改成你的后端地址（如 Render 给的 https://xxx.onrender.com），
+   本地访问时自动走 localhost，无需改代码来回切换。 */
+const PROD_API = '';   // ← 部署后填，例如 'https://food-nutrition-api.onrender.com'
+
+function apiBase() {
+  const host = location.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '' || host === '[::1]';
+  if (isLocal) return 'http://127.0.0.1:8000';
+  return PROD_API || '';      // 未配置时返回空串，下面会给出明确提示
+}
+
+const AI_URL = () => apiBase() + '/api/analyze';
+
+async function getAIAdvice(prompt) {
+  if (!apiBase()) {
+    throw new Error('未配置后端地址（部署后请在 js/app.js 里填写 PROD_API）');
+  }
+  const res = await fetch(AI_URL(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt })
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '（AI 未返回内容）';
+}
+/* ── 摘要卡 ── */
+function renderSummary(p) {
+  $('bmiVal').textContent = p.bmi.toFixed(1);
+  const tag = $('bmiTag');
+  tag.textContent = p.bmiTag;
+  tag.className = 'tag' + (p.bmiClass === 'normal' ? '' : ' warn');
+  $('bmiAdvice').textContent = p.bmiAdvice;
+
+  const items = [
+    { v: Math.round(p.targetKcal), l: '目标热量 kcal' },
+    { v: Math.round(p.proteinTarget), l: '蛋白质 g' },
+    { v: Math.round(p.carbG), l: '碳水 g' },
+    { v: Math.round(p.fatG), l: '脂肪 g' }
+  ];
+  $('macroGrid').innerHTML = items.map(i =>
+    `<div class="macro"><b>${i.v}</b><span>${i.l}</span></div>`).join('');
+
+  $('energyNote').textContent =
+    `基础代谢 ${Math.round(p.bmr)} kcal · 每日消耗 ${Math.round(p.tdee)} kcal。${p.kcalNote}` +
+    ` 蛋白质按 ${p.proteinPerKg} g/kg 体重计。`;
+}
+
+/* ── 食物卡 ── */
+function foodCard(f) {
+  const srv = SERVING[f.type] || 100;
+  const perServing = f.kcal != null ? Math.round(f.kcal * srv / 100) : null;
+
+  const stats = [
+    `<span class="kc">${fmt(f.kcal)} kcal</span>`,
+    `<span>蛋白 <b>${fmt(f.protein, 1)}</b>g</span>`,
+    `<span>脂肪 <b>${fmt(f.fat, 1)}</b>g</span>`,
+    `<span>碳水 <b>${fmt(f.cho, 1)}</b>g</span>`
+  ];
+  if (f.fiber != null) stats.push(`<span>纤维 <b>${fmt(f.fiber, 1)}</b>g</span>`);
+  if (f.na != null) stats.push(`<span>钠 <b>${fmt(f.na)}</b>mg</span>`);
+  if (f.chol != null && f.chol > 0) stats.push(`<span>胆固醇 <b>${fmt(f.chol)}</b>mg</span>`);
+
+  const pills = [
+    ...f.pros.slice(0, 5).map(t => `<span class="pill good">${t}</span>`),
+    ...f.warns.map(t => `<span class="pill warn">${t}</span>`)
+  ].join('');
+
+  const noteHtml = f.notes.length
+    ? `<p class="why-note">${f.notes.map(n => '· ' + n).join('<br>')}</p>` : '';
+  const srvNote = perServing != null
+    ? `<span class="match">参考份量 ${srv}g ≈ ${perServing} kcal</span>` : '';
+
+  return `<article class="food">
+    <div class="food-head">
+      <span class="food-name">${f.name}</span>
+      <span class="food-cat">${f.cat}${f.sub && f.sub !== f.cat ? ' · ' + f.sub : ''}</span>
+      ${favButton(f.code, f.name)}
+    </div>
+    <div class="food-stats">${stats.join('')}</div>
+    <div class="pills">${pills}</div>
+    ${noteHtml}
+    <p class="why-note">${srvNote} · 每 100 g 可食部（食部 ${fmt(f.edible)}%）</p>
+  </article>`;
+}
+
+const TABS = [
+  { key: 'protein', label: '优质蛋白' },
+  { key: 'veg', label: '蔬菜菌藻' },
+  { key: 'fruit', label: '水果' },
+  { key: 'staple', label: '主食薯类' }
+];
+
+/* 按功能/部位分栏渲染（蛋白按来源，蔬菜按部位，水果按类别，主食按谷物） */
+/* 奶类条目高度相似（各种牛奶/奶粉），单独限流以免刷屏 */
+const SLOT_LIMIT = { dairy: 4 };
+
+function renderSections(list, tab, perSection) {
+  const defs = GROUPS[tab] || [];
+  const groups = {};
+  for (const f of list) {
+    const k = groupKeyOf(f, tab);
+    (groups[k] ||= []).push(f);
+  }
+
+  const keys = defs.map(d => d.key).filter(k => groups[k] && groups[k].length);
+  const extra = Object.keys(groups).filter(k => !defs.some(d => d.key === k));
+  const labelOf = (k) => (defs.find(d => d.key === k) || {}).label || '其他';
+
+  return [...keys, ...extra].map(k => {
+    const cap = state.expanded ? 999 : Math.min(perSection, SLOT_LIMIT[k] || perSection);
+    const items = groups[k].slice(0, cap);
+    return `<h3 class="sect">${labelOf(k)}
+        <span class="muted small">共 ${groups[k].length} 种</span></h3>
+      ${items.map(foodCard).join('')}`;
+  }).join('');
+}
+
+function renderRecs() {
+  const b = state.buckets, goal = state.goal;
+
+  /* 减脂先看蔬菜，增肌先看主食；蛋白始终第一 */
+  const order = [...TABS].sort((x, y) => {
+    const rank = (k) => {
+      if (k === 'protein') return 0;
+      if (goal === 'cut') return k === 'veg' ? 1 : k === 'fruit' ? 2 : 3;
+      return k === 'staple' ? 1 : k === 'fruit' ? 2 : 3;
+    };
+    return rank(x.key) - rank(y.key);
+  });
+
+  $('tabs').innerHTML = order.map(t =>
+    `<button type="button" class="tab${t.key === state.tab ? ' active' : ''}" data-tab="${t.key}">
+       ${t.label} <span class="cnt">${(b[t.key] || []).length}</span></button>`).join('');
+
+  const list = b[state.tab] || [];
+  const perSection = state.expanded ? 999 : 6;
+  $('recList').innerHTML = list.length
+    ? renderSections(list, state.tab, perSection)
+    : '<p class="muted small">该类别暂无可推荐食物。</p>';
+
+  const btn = $('more');
+  const shownDefault = perSection * (GROUPS[state.tab] || []).length;
+  if (list.length > shownDefault) {
+    btn.classList.remove('hidden');
+    btn.textContent = state.expanded ? '收起' : `显示全部 ${list.length} 种`;
+  } else btn.classList.add('hidden');
+}
+
+/* ════════════ 食物搜索 ════════════
+   搜索结果是原始记录（没有预计算的 pros/warns），
+   这里补上与推荐卡一致的推导结果，保证两种卡片信息一致。 */
+function enrich(food) {
+  const e = Object.assign({}, food, { type: foodType(food) });
+  const d = derive(e);
+  e.pros = d.pros; e.warns = d.warns; e.notes = d.notes;
+  return e;
+}
+
+const SEARCH_LIMIT = 30;   // 默认最多渲染多少张卡，避免一次插入上千个 DOM
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderSearch() {
+  const q = $('searchInput').value;
+  const meta = $('searchMeta');
+  const box = $('searchResults');
+
+  if (!q.trim()) {
+    meta.textContent = '';
+    box.innerHTML = '';
+    return;
+  }
+
+  const r = searchFoods(state.foods, q, { limit: 999 });
+  if (!r.total) {
+    meta.textContent = '';
+    box.innerHTML = `<p class="search-empty">没有找到「${escapeHtml(q)}」<br>
+      试试更短的词，或用拼音首字母（如 jxpr = 鸡胸脯肉）</p>`;
+    return;
+  }
+
+  const shown = r.foods.slice(0, SEARCH_LIMIT);
+  meta.textContent = `找到 ${r.total} 种食物` +
+    (r.total > SEARCH_LIMIT ? `，显示前 ${SEARCH_LIMIT} 种` : '');
+
+  let html = '';
+  if (r.total > 8) {
+    const facets = searchFacets(r.foods).slice(0, 6)
+      .map(([c, n]) => `${c} ${n}`).join(' · ');
+    html += `<p class="small muted" style="margin:0 0 10px">${facets}</p>`;
+  }
+  html += shown.map(f => foodCard(enrich(f))).join('');
+  box.innerHTML = html;
+}
+
+/* ════════════ 收藏 / 历史 / 分享 ════════════ */
+function toast(msg) {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+function favButton(code, name) {
+  const on = isFavorite(code);
+  return `<button type="button" class="fav-btn${on ? ' on' : ''}"
+    data-fav="${escapeHtml(code)}" data-name="${escapeHtml(name)}"
+    title="${on ? '取消收藏' : '加入收藏'}"
+    aria-label="${on ? '取消收藏' : '加入收藏'}">${on ? '★' : '☆'}</button>`;
+}
+
+function renderFavorites() {
+  const list = getFavorites();
+  const card = $('favCard');
+  if (!list.length) { card.classList.add('hidden'); return; }
+
+  const byCode = new Map(state.foods.map(f => [f.code, f]));
+  const html = list
+    .map(x => byCode.get(x.code))
+    .filter(Boolean)
+    .map(f => `<article class="food">
+        <div class="food-head">
+          <span class="food-name">${escapeHtml(f.name)}</span>
+          <span class="food-cat">${f.cat}</span>
+          ${favButton(f.code, f.name)}
+        </div>
+        <div class="food-stats">
+          <span class="kc">${fmt(f.kcal)} kcal</span>
+          <span>蛋白 <b>${fmt(f.protein, 1)}</b>g</span>
+          <span>脂肪 <b>${fmt(f.fat, 1)}</b>g</span>
+          <span>碳水 <b>${fmt(f.cho, 1)}</b>g</span>
+        </div>
+        <p class="why-note"><span class="match">每 100 g 可食部</span></p>
+      </article>`).join('');
+
+  $('favList').innerHTML = html;
+  card.classList.remove('hidden');
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function renderHistory() {
+  const list = getHistory();
+  const card = $('historyCard');
+  if (!list.length) { card.classList.add('hidden'); return; }
+
+  $('historyList').innerHTML = list.map(e => `
+    <div class="mini-item" data-restore="${escapeHtml(e.id)}">
+      <div class="mi-main">
+        <div class="mi-title">${e.bmi} ${escapeHtml(e.bmiTag)} ·
+          ${e.goal === 'cut' ? '减脂' : '增肌'}</div>
+        <div class="mi-sub">${e.height}cm · ${e.weight}kg · ${e.age}岁 ·
+          目标 ${e.kcal} kcal / 蛋白 ${e.protein}g · ${fmtTime(e.ts)}</div>
+      </div>
+      <button type="button" class="mini-del" data-del="${escapeHtml(e.id)}"
+        title="删除这条" aria-label="删除这条">×</button>
+    </div>`).join('');
+  card.classList.remove('hidden');
+}
+
+/* 用一条历史记录（或分享参数）重新跑分析 */
+function applyProfile(src) {
+  $('sex').querySelectorAll('.seg').forEach(b =>
+    b.classList.toggle('active', b.dataset.val === src.sex));
+  state.sex = src.sex;
+  $('goal').querySelectorAll('.seg').forEach(b =>
+    b.classList.toggle('active', b.dataset.val === src.goal));
+  state.goal = src.goal;
+  $('height').value = src.height;
+  $('weight').value = src.weight;
+  $('age').value = src.age;
+  $('activity').value = String(src.activity);
+  $('go').click();
+}
+
+/* ════════════ 一日三餐渲染 ════════════ */
+function pctClass(pct, lo, hi) {
+  return (pct >= lo && pct <= hi) ? 'ok' : 'off';
+}
+
+function renderPlan(plan) {
+  const c = plan.coverage;
+  const summary = `
+    <div class="plan-summary">
+      <div class="pm"><b class="${pctClass(c.kcalPct, 90, 110)}">${plan.day.kcal}</b>
+        <span>全天热量 kcal（目标 ${plan.target.kcal}，${c.kcalPct}%）</span></div>
+      <div class="pm"><b class="${pctClass(c.proteinPct, 90, 115)}">${plan.day.protein}g</b>
+        <span>蛋白质（目标 ${plan.target.protein}g，${c.proteinPct}%）</span></div>
+      <div class="pm"><b>${plan.day.cho}g</b>
+        <span>碳水（目标 ${plan.target.carbG}g）</span></div>
+      <div class="pm"><b>${plan.day.fat}g</b>
+        <span>脂肪（目标 ${plan.target.fatG}g）</span></div>
+    </div>`;
+
+  const meals = plan.meals.map(m => {
+    const items = m.items.map(it => `
+      <div class="meal-item">
+        <span class="mi-name"><span class="mi-tag">${it.slotLabel}</span>${escapeHtml(it.name)}</span>
+        <span class="mi-grams">${it.grams} g</span>
+        <span class="mi-macros">${Math.round(it.n.kcal)} kcal ·
+          蛋白 ${it.n.protein}g · 脂肪 ${it.n.fat}g · 碳水 ${it.n.cho}g</span>
+      </div>`).join('');
+
+    return `<div class="meal">
+      <div class="meal-head">
+        <span class="m-name">${m.label}</span>
+        <span class="m-cal">目标 ${m.target.kcal} kcal / 蛋白 ${m.target.protein}g</span>
+      </div>
+      ${items}
+      <div class="meal-total">
+        <span>本餐合计</span>
+        <span><b>${m.totals.kcal} kcal</b> · 蛋白 ${m.totals.protein}g ·
+          脂肪 ${m.totals.fat}g · 碳水 ${m.totals.cho}g</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const naNote = plan.day.na > 2000
+    ? `<p class="small" style="color:var(--warn);margin:10px 0 0">
+         全天钠 ${plan.day.na} mg，超过 2000 mg 建议上限，注意减少腌制与加工食品。</p>`
+    : `<p class="small muted" style="margin:10px 0 0">
+         全天钠 ${plan.day.na} mg（建议上限 2000 mg）· 膳食纤维 ${plan.day.fiber} g。</p>`;
+
+  $('planResult').innerHTML = summary + meals + naNote;
+  $('planResult').classList.remove('hidden');
+}
+
+/* ── 事件 ── */
+function initSegmented(id, cb) {
+  const box = $(id);
+  box.addEventListener('click', (e) => {
+    const btn = e.target.closest('.seg');
+    if (!btn) return;
+    [...box.children].forEach(c => c.classList.toggle('active', c === btn));
+    cb(btn.dataset.val);
+  });
+}
+
+function readForm() {
+  const height = parseFloat($('height').value);
+  const weight = parseFloat($('weight').value);
+  const age = parseFloat($('age').value);
+  const errs = [];
+  if (!(height >= 120 && height <= 230)) errs.push('身高需在 120–230 cm');
+  if (!(weight >= 25 && weight <= 250)) errs.push('体重需在 25–250 kg');
+  if (!(age >= 18 && age <= 100)) errs.push('年龄需在 18–100 岁（公式适用于成人）');
+  return { height, weight, age, errs };
+}
+
+function bind() {
+  initSegmented('sex', v => state.sex = v);
+  initSegmented('goal', v => state.goal = v);
+
+  /* 搜索：输入防抖 200ms，输入框清空时收起结果 */
+  let searchTimer = null;
+  $('searchInput').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderSearch, 200);
+  });
+  $('searchInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { $('searchInput').value = ''; renderSearch(); }
+  });
+
+  $('tabs').addEventListener('click', (e) => {
+    const t = e.target.closest('.tab');
+    if (!t) return;
+    state.tab = t.dataset.tab;
+    state.expanded = false;
+    renderRecs();
+  });
+
+  $('more').addEventListener('click', () => {
+    state.expanded = !state.expanded;
+    renderRecs();
+  });
+
+  /* ── 收藏：事件委托，推荐列表与搜索结果共用 ── */
+  document.addEventListener('click', (e) => {
+    const fav = e.target.closest('.fav-btn');
+    if (fav) {
+      e.stopPropagation();
+      const res = toggleFavorite(fav.dataset.fav, fav.dataset.name);
+      toast(res.added ? `已收藏「${fav.dataset.name}」` : `已取消收藏「${fav.dataset.name}」`);
+      /* 同步页面上所有指向同一食物的星标 */
+      document.querySelectorAll(`.fav-btn[data-fav="${CSS.escape(fav.dataset.fav)}"]`)
+        .forEach(b => {
+          b.classList.toggle('on', res.added);
+          b.textContent = res.added ? '★' : '☆';
+          b.title = res.added ? '取消收藏' : '加入收藏';
+        });
+      renderFavorites();
+      return;
+    }
+
+    /* ── 历史：点条目恢复分析，点 × 删除 ── */
+    const del = e.target.closest('.mini-del');
+    if (del) {
+      e.stopPropagation();
+      removeHistory(del.dataset.del);
+      renderHistory();
+      return;
+    }
+    const item = e.target.closest('[data-restore]');
+    if (item) {
+      const rec = getHistory().find(x => x.id === item.dataset.restore);
+      if (rec) { applyProfile(rec); toast('已按该记录重新分析'); }
+    }
+  });
+
+  $('clearHistoryBtn').addEventListener('click', () => {
+    clearHistory();
+    renderHistory();
+    toast('已清空历史记录');
+  });
+  $('clearFavBtn').addEventListener('click', () => {
+    clearFavorites();
+    renderFavorites();
+    toast('已清空收藏');
+  });
+
+  /* ── 分享：把身体数据编码进链接 ── */
+  $('shareBtn').addEventListener('click', async () => {
+    const { height, weight, age, errs } = readForm();
+    if (errs.length) { toast('请先填好身体数据再分享'); return; }
+    const form = {
+      sex: state.sex, height, weight, age,
+      activity: parseFloat($('activity').value), goal: state.goal
+    };
+    const url = buildShareUrl(location.origin, location.pathname, form);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: '我的营养分析', text: '这是我用食物营养分析工具算出的结果', url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      toast('链接已复制，粘贴给朋友即可');
+    } catch (_) {
+      /* 剪贴板不可用（如 http 非安全上下文）时把链接显示出来手动复制 */
+      window.prompt('复制下面的链接分享：', url);
+    }
+  });
+
+  $('resetBtn').addEventListener('click', () => {
+    $('height').value = ''; $('weight').value = ''; $('age').value = '';
+    $('result').classList.add('hidden');
+    $('formMsg').textContent = '';
+    $('height').focus();
+  });
+  /* 生成配餐：按当前画像即时计算（纯计算层，无需请求后端） */
+  $('planBtn').addEventListener('click', () => {
+    if (!state.profile) {
+      $('formMsg').textContent = '请先填写身体数据并点击「开始分析」';
+      return;
+    }
+    const btn = $('planBtn');
+    btn.textContent = '正在计算…';
+    btn.disabled = true;
+    /* 让浏览器先画出"正在计算"，再跑同步计算 */
+    setTimeout(() => {
+      try {
+        const plan = buildDayPlan(state.foods, state.profile, state.goal);
+        renderPlan(plan);
+        btn.textContent = '重新生成';
+      } catch (err) {
+        $('planResult').innerHTML =
+          `<p class="small" style="color:var(--danger)">配餐生成失败：${escapeHtml(err.message)}</p>`;
+        $('planResult').classList.remove('hidden');
+        btn.textContent = '生成配餐';
+      } finally {
+        btn.disabled = false;
+      }
+    }, 30);
+  });
+
+  $('go').addEventListener('click', () => {
+    const { height, weight, age, errs } = readForm();
+    const msg = $('formMsg');
+    if (errs.length) { msg.textContent = errs.join('；'); return; }
+    msg.textContent = '';
+
+    state.activity = parseFloat($('activity').value);
+    const profile = computeProfile({
+      sex: state.sex, height, weight, age, activity: state.activity, goal: state.goal
+    });
+    state.profile = profile;
+    state.buckets = recommend(state.foods, state.goal);
+    state.tab = 'protein';        // 优质蛋白是首要答案，默认展示
+    state.expanded = false;
+
+    renderSummary(profile);
+    $('recIntro').textContent = state.goal === 'cut'
+      ? '减脂优先：高蛋白 + 高纤维 + 低热量密度。蛋白质帮助保住肌肉，纤维提升饱腹感。'
+      : '增肌优先：高蛋白 + 热量友好。主食与蛋白并重，训练后及时补充。';
+    renderRecs();
+
+    /* 记入历史 + 记住本次参数，下次打开自动回填 */
+    const form = { sex: state.sex, height, weight, age, activity: state.activity, goal: state.goal };
+    addHistory(compactEntry(profile, state.goal, form));
+    saveLastProfile(form);
+    renderHistory();
+
+    /* 新的画像 → 旧的配餐作废，避免与当前目标不符 */
+    $('planResult').classList.add('hidden');
+    $('planResult').innerHTML = '';
+    $('planBtn').textContent = '生成配餐';
+
+    $('result').classList.remove('hidden');
+    $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    /* AI 建议 */
+      const aiBox = $('aiAdvice');
+    aiBox.classList.remove('hidden');
+    aiBox.textContent = 'AI 正在生成个性化建议…';
+
+    const topFoods = (state.buckets.protein || [])
+      .slice(0, 5).map(f => f.name).join('、');
+
+    const prompt =
+      `用户：${state.sex === 'male' ? '男' : '女'}，${age}岁，` +
+      `${height}cm，${weight}kg，BMI ${profile.bmi.toFixed(1)}（${profile.bmiTag}）。` +
+      `目标：${state.goal === 'cut' ? '减脂' : '增肌'}。` +
+      `每日目标：热量 ${Math.round(profile.targetKcal)} kcal，` +
+      `蛋白质 ${Math.round(profile.proteinTarget)}g，` +
+      `碳水 ${Math.round(profile.carbG)}g，脂肪 ${Math.round(profile.fatG)}g。` +
+      `系统已推荐的高蛋白食材包括：${topFoods}。` +
+      `请用 3-4 句话，说明这些推荐为什么适合该用户，` +
+      `并指出他这类人群最需要注意的一条饮食禁忌。`;
+
+    getAIAdvice(prompt)
+      .then(text => { aiBox.textContent = text; })
+      .catch(err => { aiBox.textContent = 'AI 建议获取失败：' + err.message; });
+  });
+}
+
+/* ── 启动 ── */
+(async function main() {
+  bind();
+  renderHistory();
+  renderFavorites();
+
+  try {
+    const res = await fetch('data/foods.json');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    state.foods = await res.json();
+    $('formMsg').textContent = '';
+
+    /* 1) 分享链接优先：打开即复现对方的分析结果 */
+    const shared = readShareFromHash(location.hash);
+    if (shared) {
+      applyProfile(shared);
+      toast('已载入分享的分析结果');
+      /* 清掉 hash，避免用户改完参数后刷新又被覆盖 */
+      history.replaceState(null, '', location.pathname + location.search);
+      return;
+    }
+
+    /* 2) 否则回填上次填过的数据，但不自动分析（避免每次打开都发起 AI 请求） */
+    const last = getLastProfile();
+    if (last) {
+      $('height').value = last.height;
+      $('weight').value = last.weight;
+      $('age').value = last.age;
+      $('activity').value = String(last.activity);
+      $('sex').querySelectorAll('.seg').forEach(b =>
+        b.classList.toggle('active', b.dataset.val === last.sex));
+      state.sex = last.sex;
+      $('goal').querySelectorAll('.seg').forEach(b =>
+        b.classList.toggle('active', b.dataset.val === last.goal));
+      state.goal = last.goal;
+    }
+  } catch (err) {
+    $('formMsg').textContent =
+      '数据加载失败：' + err.message +
+      '。若直接双击打开 HTML，浏览器会拦截本地文件读取，请用本地服务器访问（见 README）。';
+  }
+})();

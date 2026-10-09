@@ -1,0 +1,21 @@
+# 放在 web 目录下的这份是「保险」：
+# 如果你不小心在 web/ 里执行 git init（而不是项目根目录），
+# 根目录的 .gitignore 不会生效，密钥就可能被提交上去。
+
+# ── 密钥（最重要） ──
+.env
+.env.*
+!.env.example
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── 系统与编辑器 ──
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

@@ -175,49 +175,172 @@ select {
 .muted { color: var(--muted); }
 .hidden { display: none !important; }
 
-/* ── BMI 摘要 ── */
-.bmi-row { display: flex; align-items: center; gap: 16px; }
-.bmi-box {
-  flex: 0 0 auto;
-  width: 96px; height: 96px;
-  border-radius: 50%;
-  background: var(--brand-soft);
+/* ── 营养画像卡：热量主视觉 ── */
+.hero {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 4px 0 16px;
+  border-bottom: 1px solid var(--line);
 }
-.bmi-num { font-size: 27px; font-weight: 800; color: var(--brand); line-height: 1.1; }
-.bmi-label { font-size: 11.5px; color: var(--muted); letter-spacing: .5px; }
-.bmi-info { flex: 1 1 auto; min-width: 0; }
-.bmi-info p { margin: 7px 0 0; }
+.hero-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .3px;
+  margin-bottom: 2px;
+}
+.hero-value { display: flex; align-items: baseline; gap: 6px; }
+.hero-value #kcalBig {
+  font-size: 46px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--ink);
+  letter-spacing: -1.5px;
+  font-variant-numeric: tabular-nums;
+}
+.hero-unit { font-size: 15px; font-weight: 700; color: var(--muted); }
+.hero-body {
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.hero-body b { color: #3d4f45; font-weight: 700; }
 
-.tag {
+.block-title {
+  margin: 18px 0 10px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+/* ── 三大营养素进度条 ── */
+.macro-bars { display: flex; flex-direction: column; gap: 15px; }
+.mb-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.mb-name { font-size: 13px; font-weight: 700; color: #3d4f45; }
+.mb-value { font-size: 19px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mb-value i { font-size: 12px; font-weight: 600; font-style: normal; color: var(--muted); margin-left: 1px; }
+.mb-kcal { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+/* 进度条本体：底层是「参考区间」，上层是「你的比例」 */
+.mb-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: #f0f4f1;
+  overflow: hidden;
+}
+.mb-range {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: #e3ece7;                    /* 参考区间底色 */
+  border-left: 1px solid #c2d2c8;
+  border-right: 1px solid #c2d2c8;
+}
+.mb-fill {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  border-radius: 0 4px 4px 0;
+  transition: width .5s cubic-bezier(.2,.7,.3,1);
+}
+.mb-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.mb-foot .in-range { color: var(--good); font-weight: 700; }
+.mb-foot .out-range { color: var(--warn); font-weight: 700; }
+
+/* ── BMI 色带标尺 ── */
+.bmi-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.bmi-tag {
   display: inline-block;
-  padding: 4px 11px;
+  padding: 4px 12px;
   border-radius: 999px;
   font-size: 13px;
   font-weight: 700;
   background: var(--brand-soft);
   color: var(--brand);
 }
-.tag.warn { background: var(--warn-bg); color: var(--warn); }
+.bmi-tag.warn { background: var(--warn-bg); color: var(--warn); }
+.bmi-num-wrap { text-align: right; flex: 0 0 auto; }
+.bmi-value {
+  font-size: 34px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.bmi-unit { display: block; font-size: 11px; color: var(--muted); letter-spacing: .5px; }
 
-.macros {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 9px;
-  margin-top: 16px;
+.scale { position: relative; padding-bottom: 20px; }
+.scale-bar {
+  display: flex;
+  height: 9px;
+  border-radius: 999px;
+  overflow: hidden;
+  gap: 2px;
 }
-.macro {
-  background: #fafbfa;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  padding: 11px 8px;
-  text-align: center;
+.scale-seg { height: 100%; }
+/* 分区配色：偏瘦 / 正常 / 超重 / 肥胖 */
+.scale-seg.s1 { background: #f3c96b; }
+.scale-seg.s2 { background: #8ecf9a; }
+.scale-seg.s3 { background: #f0b45e; }
+.scale-seg.s4 { background: #e8836f; }
+.scale-seg.s5 { background: #d9534f; }
+
+.scale-marks {
+  display: flex;
+  margin-top: 5px;
+  font-size: 10.5px;
+  color: var(--muted);
 }
-.macro b { display: block; font-size: 18px; font-weight: 800; color: var(--ink); }
-.macro span { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.scale-marks span { text-align: center; font-variant-numeric: tabular-nums; }
+
+/* 三角标记定位到具体 BMI */
+.scale-pin {
+  position: absolute;
+  bottom: 12px;
+  transform: translateX(-50%);
+  transition: left .5s cubic-bezier(.2,.7,.3,1);
+}
+.scale-pin::after {
+  content: '';
+  display: block;
+  width: 0; height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid var(--ink);
+  margin: 0 auto;
+}
+.scale-pin::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  width: 2px; height: 7px;
+  margin-left: -1px;
+  background: var(--ink);
+}
 
 .why { margin-top: 15px; border-top: 1px solid var(--line); padding-top: 11px; }
 .why summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--brand); }

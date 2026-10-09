@@ -100,17 +100,36 @@
 
     <div class="card" id="summaryCard">
       <h2><span class="step">2</span>你的营养画像</h2>
-      <div class="bmi-row">
-        <div class="bmi-box">
-          <span class="bmi-num" id="bmiVal">—</span>
-          <span class="bmi-label">BMI</span>
+
+      <!-- 主视觉：每日目标热量 -->
+      <div class="hero">
+        <div class="hero-main">
+          <span class="hero-label">每日目标热量</span>
+          <div class="hero-value">
+            <span id="kcalBig">—</span><span class="hero-unit">千卡</span>
+          </div>
         </div>
-        <div class="bmi-info">
-          <span class="tag" id="bmiTag">—</span>
-          <p id="bmiAdvice" class="small"></p>
+        <div class="hero-body" id="bodyFacts"></div>
+      </div>
+
+      <!-- 三大营养素分配（进度条 = 占总热量比例） -->
+      <h3 class="block-title">每日营养素分配</h3>
+      <div id="macroBars" class="macro-bars"></div>
+
+      <!-- BMI 色带标尺 -->
+      <h3 class="block-title">身体质量指数</h3>
+      <div class="bmi-head">
+        <div>
+          <span class="bmi-tag" id="bmiTag">—</span>
+          <p class="small muted" id="bmiAdvice" style="margin:4px 0 0"></p>
+        </div>
+        <div class="bmi-num-wrap">
+          <span class="bmi-value" id="bmiVal">—</span>
+          <span class="bmi-unit">BMI</span>
         </div>
       </div>
-      <div class="macros" id="macroGrid"></div>
+      <div class="scale" id="bmiScale"></div>
+
       <div id="aiAdvice" class="ai-box hidden"></div>
       <details class="why">
         <summary>这些数字怎么算的？</summary>

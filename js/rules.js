@@ -445,18 +445,35 @@ export function computeProfile({ sex, height, weight, age, activity, goal }) {
   if (bmiClass === 'low' && goal === 'cut') {
     kcalNote += ' ⚠ 你的 BMI 已偏低，不建议继续减脂，请优先考虑增重或维持。';
   }
-  /* 蛋白质：减脂期提高蛋白以保住肌肉；增肌期 1.6 g/kg 偏低，
-     且会让剩余热量过多地压在碳水/脂肪上，与主流建议（1.6–2.2 g/kg）
-     和实际可执行的饮食都不符，故两个目标统一取 1.8。 */
+  /* ── 宏量分配口径 ──
+     蛋白质优先按体重确定（1.8 g/kg）。碳水与脂肪按「扣掉蛋白后的剩余热量」
+     以 c:f 比例分配。
+     若像早先那样让碳/脂按「目标热量」的百分比算，三项之和会等于
+     目标热量 + 蛋白热量，永远对不上（实测差 108 kcal）。
+     用剩余热量分配则三项之和恰好等于目标热量。 */
   const proteinPerKg = 1.8;
-  const split = goal === 'cut' ? { p: 0.32, f: 0.26, c: 0.42 } : { p: 0.28, f: 0.27, c: 0.45 };
-  /* 供界面「这些数字怎么算的？」折叠区展示，避免文案与计算脱节 */
-  const splitLabel = `碳水 ${Math.round(split.c * 100)}% / 脂肪 ${Math.round(split.f * 100)}% / 蛋白 ${Math.round(split.p * 100)}%`;
+  const proteinG = weight * proteinPerKg;
+  const rest = Math.max(targetKcal - proteinG * 4, targetKcal * 0.4);
+  const cf = goal === 'cut' ? { c: 0.62, f: 0.38 } : { c: 0.62, f: 0.38 };
+  const carbG = rest * cf.c / 4;
+  const fatG = rest * cf.f / 9;
+
+  /* 实际供能比：三项之和恒为 100%，界面说明与计算不会自相矛盾 */
+  const totalKcal = proteinG * 4 + carbG * 4 + fatG * 9;
+  const realPct = {
+    p: proteinG * 4 / totalKcal,
+    c: carbG * 4 / totalKcal,
+    f: fatG * 9 / totalKcal
+  };
+  const pc = (v) => `${Math.round(v * 100)}%`;
+  const splitLabel =
+    `碳水 ${pc(realPct.c)} / 脂肪 ${pc(realPct.f)} / 蛋白 ${pc(realPct.p)}`;
+
   return {
     bmi, bmiTag, bmiAdvice, bmiClass, bmr, tdee, targetKcal, kcalNote,
-    goalFactor, splitLabel,
-    proteinTarget: weight * proteinPerKg, proteinPerKg,
-    carbG: targetKcal * split.c / 4, fatG: targetKcal * split.f / 9, split
+    goalFactor, splitLabel, realPct,
+    proteinTarget: proteinG, proteinPerKg,
+    carbG, fatG, macroKcal: totalKcal
   };
 }
 

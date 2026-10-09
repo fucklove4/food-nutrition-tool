@@ -51,35 +51,115 @@ async function getAIAdvice(prompt) {
   const data = await res.json();
   return data.choices?.[0]?.message?.content || '（AI 未返回内容）';
 }
+/* ── 营养素供能比参考区间 ──
+   依据《中国居民膳食指南》的宏量营养素可接受范围（AMDR）：
+   碳水 50–65%、脂肪 20–30%、蛋白 10–20%。
+   进度条以「占总热量百分比」为尺度，并标出该区间，方便一眼看出是否偏离。 */
+const MACRO_DEFS = [
+  { key: 'cho', name: '碳水', color: '#d95f5f', kcalPerG: 4, range: [50, 65] },
+  { key: 'protein', name: '蛋白质', color: '#7c5cd6', kcalPerG: 4, range: [10, 20] },
+  { key: 'fat', name: '脂肪', color: '#e08a3c', kcalPerG: 9, range: [20, 30] }
+];
+
+/* 进度条满刻度取 70%：三个区间的上限（65/20/30）都落在可视范围内 */
+const BAR_SCALE = 70;
+
+/* ── BMI 色带：中国成人标准 ── */
+const BMI_ZONES = [
+  { to: 18.5, cls: 's1' },
+  { to: 24, cls: 's2' },
+  { to: 28, cls: 's3' },
+  { to: 32, cls: 's4' },
+  { to: 40, cls: 's5' }
+];
+const BMI_MIN = 15, BMI_MAX = 40;
+
+function bmiPinPercent(bmi) {
+  const v = Math.min(Math.max(bmi, BMI_MIN), BMI_MAX);
+  return (v - BMI_MIN) / (BMI_MAX - BMI_MIN) * 100;
+}
+
+function buildBmiScale(bmi) {
+  /* 分段宽度按 BMI 跨度占比，而不是等分 —— 这样标记位置才有意义 */
+  let prev = BMI_MIN;
+  const segs = BMI_ZONES.map(z => {
+    const w = (z.to - prev) / (BMI_MAX - BMI_MIN) * 100;
+    prev = z.to;
+    return `<div class="scale-seg ${z.cls}" style="width:${w.toFixed(3)}%"></div>`;
+  }).join('');
+
+  const marks = [BMI_MIN, 18.5, 24, 28, 32, 40].map((v, i, arr) => {
+    const left = i === 0 ? 0 : (arr[i - 1] + v) / 2;   // 中心点，视觉上更均衡
+    let c = 0;
+    for (let k = 0; k < i; k++) c += (arr[k + 1] - arr[k]) / (BMI_MAX - BMI_MIN) * 100;
+    c += (v - (i === 0 ? BMI_MIN : arr[i - 1])) / (BMI_MAX - BMI_MIN) * 100 / 2;
+    return `<span style="width:${
+      ((i === arr.length - 1 ? BMI_MAX : arr[i + 1]) - v) / (BMI_MAX - BMI_MIN) * 100
+    }%">${v}</span>`;
+  }).join('');
+
+  return `<div class="scale-bar">${segs}</div>
+    <div class="scale-marks">${marks}</div>
+    <div class="scale-pin" style="left:${bmiPinPercent(bmi).toFixed(2)}%"></div>`;
+}
+
 /* ── 摘要卡 ──
-   主视图只保留「结论」：BMI + 四个目标数字。
-   基础代谢/每日消耗等推导过程放进「这些数字怎么算的？」折叠区，
-   避免卡片一上来就堆一大段说明。 */
+   主视图只给「结论」：热量主视觉 + 营养素分配 + BMI 色带。
+   推导过程放进折叠区，数字来源仍可追溯。 */
 function renderSummary(p) {
+  /* 1) 热量主视觉 */
+  $('kcalBig').textContent = Math.round(p.targetKcal);
+  const facts = currentForm();
+  $('bodyFacts').innerHTML =
+    `${facts.goal === 'cut' ? '减脂' : '增肌'} · ${facts.sex === 'male' ? '男' : '女'}<br>` +
+    `<b>${facts.weight}</b> 公斤 / <b>${facts.height}</b> 厘米 / <b>${facts.age}</b> 岁`;
+
+  /* 2) 营养素分配进度条 */
+  const total = p.targetKcal;
+  $('macroBars').innerHTML = MACRO_DEFS.map(d => {
+    const grams = d.key === 'cho' ? p.carbG : d.key === 'protein' ? p.proteinTarget : p.fatG;
+    const kcal = grams * d.kcalPerG;
+    const pct = kcal / total * 100;
+    const inRange = pct >= d.range[0] && pct <= d.range[1];
+    const fillW = Math.min(pct / BAR_SCALE * 100, 100);
+    const rL = d.range[0] / BAR_SCALE * 100;
+    const rW = (d.range[1] - d.range[0]) / BAR_SCALE * 100;
+    return `<div class="mb">
+      <div class="mb-head">
+        <span class="mb-name">${d.name}</span>
+        <span class="mb-kcal">${Math.round(kcal)} 千卡 · 占 ${pct.toFixed(1)}%</span>
+      </div>
+      <div class="mb-value">${Math.round(grams)}<i>克</i></div>
+      <div class="mb-track">
+        <div class="mb-range" style="left:${rL.toFixed(2)}%;width:${rW.toFixed(2)}%"></div>
+        <div class="mb-fill" style="width:${fillW.toFixed(2)}%;background:${d.color}"></div>
+      </div>
+      <div class="mb-foot">
+        <span>参考区间 ${d.range[0]}–${d.range[1]}%</span>
+        <span class="${inRange ? 'in-range' : 'out-range'}">${inRange ? '在区间内' : '偏离区间'}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  /* 3) BMI 色带 */
   $('bmiVal').textContent = p.bmi.toFixed(1);
   const tag = $('bmiTag');
   tag.textContent = p.bmiTag;
-  tag.className = 'tag' + (p.bmiClass === 'normal' ? '' : ' warn');
+  tag.className = 'bmi-tag' + (p.bmiClass === 'normal' ? '' : ' warn');
   $('bmiAdvice').textContent = p.bmiAdvice;
+  $('bmiScale').innerHTML = buildBmiScale(p.bmi);
 
-  const items = [
-    { v: Math.round(p.targetKcal), l: '目标热量 kcal' },
-    { v: Math.round(p.proteinTarget), l: '蛋白质 g' },
-    { v: Math.round(p.carbG), l: '碳水 g' },
-    { v: Math.round(p.fatG), l: '脂肪 g' }
-  ];
-  $('macroGrid').innerHTML = items.map(i =>
-    `<div class="macro"><b>${i.v}</b><span>${i.l}</span></div>`).join('');
-
-  /* 推导过程写进折叠区，数字来源仍可追溯 */
+  /* 4) 推导过程（折叠区） */
   $('calcDetail').innerHTML =
     `<li>基础代谢（Mifflin-St Jeor）：男 = 10×体重 + 6.25×身高 − 5×年龄 + 5；女 = 同式 − 161
          → 你的基础代谢 <b>${Math.round(p.bmr)} kcal</b></li>
      <li>每日消耗 = 基础代谢 × 活动系数 → 你的每日消耗 <b>${Math.round(p.tdee)} kcal</b></li>
      <li>目标热量 = 每日消耗 × ${p.goalFactor} → <b>${Math.round(p.targetKcal)} kcal</b>
          ${p.kcalNote}</li>
-     <li>蛋白质 = ${p.proteinPerKg} g/kg × 体重 → <b>${Math.round(p.proteinTarget)} g</b></li>
-     <li>碳水和脂肪按目标热量的比例拆分（${p.splitLabel}）</li>`;
+     <li>蛋白质 = ${p.proteinPerKg} g/kg × 体重 → <b>${Math.round(p.proteinTarget)} g</b>；
+         碳水与脂肪由「剩余热量」分配</li>
+     <li>由此得到的实际供能比：${p.splitLabel}
+         （营养素进度条即按此比例绘制）</li>`;
 }
 
 /* ── 食物卡 ── */
@@ -396,6 +476,17 @@ function readForm() {
   if (!(weight >= 25 && weight <= 250)) errs.push('体重需在 25–250 kg');
   if (!(age >= 18 && age <= 100)) errs.push('年龄需在 18–100 岁（公式适用于成人）');
   return { height, weight, age, errs };
+}
+
+/* 当前表单值（含性别与目标），用于摘要卡展示"你的数据" */
+function currentForm() {
+  return {
+    sex: state.sex,
+    goal: state.goal,
+    height: $('height').value,
+    weight: $('weight').value,
+    age: $('age').value
+  };
 }
 
 function bind() {

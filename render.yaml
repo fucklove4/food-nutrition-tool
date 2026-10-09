@@ -1,0 +1,28 @@
+# Render 部署配置（基础设施即代码）
+#
+# 放到仓库根目录后，Render 可以识别并自动按此配置创建服务，
+# 也可以在 Render 网页上手动填这两条命令，效果相同：
+#   Build Command: pip install -r requirements.txt
+#   Start Command: uvicorn server:app --host 0.0.0.0 --port $PORT
+#
+# 注意：
+# - 必须绑 0.0.0.0 而不是 127.0.0.1，否则 Render 的健康检查连不上
+# - 必须用 $PORT，Render 会动态分配端口，写死 8000 会启动失败
+# - DEEPSEEK_API_KEY 不要写在这里！在 Render 控制台的
+#   Environment → Environment Variables 里配置（sync: false 表示留空待填）
+
+services:
+  - type: web
+    name: food-nutrition-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false          # 在控制台手动填，不进代码库
+      - key: DEEPSEEK_MODEL
+        value: deepseek-flash
+      - key: PYTHON_VERSION
+        value: "3.13.2"

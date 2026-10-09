@@ -27,7 +27,11 @@
 
 需要一个本地服务器（浏览器禁止 `file://` 读取本地 JSON）。
 
-**Windows 一键启动**：双击 `启动.bat`，用完双击 `停止.bat`。
+**Windows 一键启动**：双击 `start.bat`，用完双击 `stop.bat`。
+`preflight.bat` 是部署前的密钥安全检查。
+
+> 三个 .bat 都是纯 ASCII 英文内容。这是刻意的：`chcp 65001` + 中文的批处理
+> 会让 cmd.exe 按字节偏移解析文件时错位，把命令切断（`timeout` 被读成 `imeout`）。
 
 **手动方式**：
 

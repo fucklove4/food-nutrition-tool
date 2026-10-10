@@ -8,7 +8,9 @@
 export const KEYS = {
   history: 'fnt.history.v1',
   favorites: 'fnt.favorites.v1',
-  last: 'fnt.lastProfile.v1'
+  last: 'fnt.lastProfile.v1',
+  apiKey: 'fnt.apiKey.v1',
+  settings: 'fnt.settings.v1'
 };
 
 export const LIMITS = { history: 20, favorites: 60 };
@@ -198,4 +200,51 @@ export function readShareFromHash(hash) {
 
 export function buildShareUrl(origin, pathname, form) {
   return `${origin}${pathname}#p=${encodeShare(form)}`;
+}
+
+/* ════════════ 用户自带的 API Key ════════════
+   开源后不能让大家共用作者的密钥（会被盗刷）。
+   让用户填自己的 Key，并且**只存在浏览器本地**，
+   请求直接从浏览器发往 DeepSeek —— 密钥不经过任何中间服务器。 */
+
+export function getApiKey() {
+  const v = read(KEYS.apiKey, null);
+  return typeof v === 'string' && v.trim() ? v.trim() : '';
+}
+
+export function setApiKey(key) {
+  const v = String(key || '').trim();
+  if (!v) return clearApiKey();
+  write(KEYS.apiKey, v);
+  return v;
+}
+
+export function clearApiKey() {
+  try { getBackend().removeItem(KEYS.apiKey); } catch (_) { /* 忽略 */ }
+  return '';
+}
+
+/* 只显示首尾，用于界面回显，避免整串密钥暴露在屏幕上 */
+export function maskKey(key) {
+  const v = String(key || '');
+  if (v.length <= 12) return v ? '••••' : '';
+  return `${v.slice(0, 6)}••••${v.slice(-4)}`;
+}
+
+/* 本地格式校验：只做基本形状检查，真实有效性必须发一次请求才知道 */
+export function looksLikeKey(key) {
+  const v = String(key || '').trim();
+  return /^sk-[A-Za-z0-9_-]{16,}$/.test(v);
+}
+
+/* ════════════ 用户偏好 ════════════ */
+export function getSettings() {
+  const s = read(KEYS.settings, null);
+  return (s && typeof s === 'object') ? s : {};
+}
+
+export function saveSettings(patch) {
+  const next = Object.assign({}, getSettings(), patch);
+  write(KEYS.settings, next);
+  return next;
 }

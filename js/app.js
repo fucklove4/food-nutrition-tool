@@ -14,7 +14,9 @@ import {
   getHistory, addHistory, removeHistory, clearHistory,
   getFavorites, isFavorite, toggleFavorite, clearFavorites,
   compactEntry, saveLastProfile, getLastProfile,
-  readShareFromHash, buildShareUrl
+  readShareFromHash, buildShareUrl,
+  getApiKey, setApiKey, clearApiKey, maskKey, looksLikeKey,
+  getSettings, saveSettings
 } from './store.js';
 
 const state = {
@@ -26,29 +28,90 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 0) => (v == null ? '—' : Number(v).toFixed(d).replace(/\.0+$/, ''));
 /* ── AI 调用 ──
-   部署后把 PROD_API 改成你的后端地址（如 Render 给的 https://xxx.onrender.com），
-   本地访问时自动走 localhost，无需改代码来回切换。 */
-const PROD_API = '';   // ← 部署后填，例如 'https://food-nutrition-api.onrender.com'
+   两种模式：
+   1) 用户填了自己的 DeepSeek Key → 浏览器直连官方 API。
+      密钥只存本地 localStorage，**从不经过任何中间服务器**。
+      （已实测 DeepSeek 允许浏览器跨域调用。）
+   2) 没填 Key → 回落到自建后端（作者自用 / 本地开发）。
+   开源部署时后端可以完全不部署，只留模式 1。 */
+const PROD_API = '';   // 部署后填自建后端地址，例如 'https://xxx.onrender.com'
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_MODEL = 'deepseek-flash';
 
-function apiBase() {
+/* System Prompt 固定不变，可命中 DeepSeek 的上下文缓存（更便宜、更快） */
+const SYSTEM_PROMPT =
+  '你是一位专业的注册营养师，擅长把营养学数据转述成普通人能执行的饮食建议。\n' +
+  '要求：\n' +
+  '1. 只依据用户提供的数据作答，不要编造任何食物营养成分数值。\n' +
+  '2. 用简洁的中文，3-4 句话，不要分点罗列，不要用 Markdown 标题。\n' +
+  '3. 必须包含一条针对该用户情况的具体、可执行的建议。\n' +
+  '4. 不诊断疾病、不推荐保健品、不承诺疗效；如涉及疾病请提示遵医嘱。';
+
+function backendBase() {
   const host = location.hostname;
   const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '' || host === '[::1]';
   if (isLocal) return 'http://127.0.0.1:8000';
-  return PROD_API || '';      // 未配置时返回空串，下面会给出明确提示
+  return PROD_API || '';
 }
 
-const AI_URL = () => apiBase() + '/api/analyze';
+/* 把上游错误翻译成用户能照着做的提示 */
+function friendlyAIError(status, bodyText) {
+  if (status === 401) return 'API Key 无效或已失效，请在「AI 设置」里重新填写';
+  if (status === 402) return 'DeepSeek 账户余额不足，请先充值';
+  if (status === 429) return '请求过于频繁，稍等几秒再试';
+  if (status === 400 && /model/i.test(bodyText || '')) return '模型名不被支持，请更新代码里的模型名';
+  if (status >= 500) return `DeepSeek 服务异常（HTTP ${status}），稍后再试`;
+  return `调用失败（HTTP ${status}）`;
+}
 
 async function getAIAdvice(prompt) {
-  if (!apiBase()) {
-    throw new Error('未配置后端地址（部署后请在 js/app.js 里填写 PROD_API）');
+  const key = getApiKey();
+
+  /* 模式 1：用户自己的密钥，浏览器直连 */
+  if (key) {
+    let res;
+    try {
+      res = await fetch(DEEPSEEK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`
+        },
+        body: JSON.stringify({
+          model: DEEPSEEK_MODEL,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: prompt }
+          ],
+          stream: false,
+          temperature: 0.7
+        })
+      });
+    } catch (_) {
+      throw new Error('无法连接 DeepSeek（检查网络，或浏览器插件是否拦截了请求）');
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(friendlyAIError(res.status, body));
+    }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || '（AI 未返回内容）';
   }
-  const res = await fetch(AI_URL(), {
+
+  /* 模式 2：自建后端代理 */
+  const base = backendBase();
+  if (!base) {
+    throw new Error('还没有配置 AI。点上方「AI 设置」填入你自己的 DeepSeek API Key 即可使用。');
+  }
+  const res = await fetch(base + '/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt })
   });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(friendlyAIError(res.status, body));
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content || '（AI 未返回内容）';
 }
@@ -335,6 +398,52 @@ function renderSearch() {
   box.innerHTML = html;
 }
 
+/* ════════════ AI 设置 ════════════ */
+function renderAISettings() {
+  const key = getApiKey();
+  const badge = $('aiBadge');
+  const status = $('aiStatus');
+  const detail = $('aiDetail');
+
+  if (key) {
+    badge.textContent = '已配置';
+    badge.className = 'ai-badge ok';
+    status.textContent =
+      `正在使用你自己的密钥（${maskKey(key)}），请求直接发往 DeepSeek，不经过任何服务器。`;
+    $('apiKeyInput').value = '';
+    $('apiKeyInput').placeholder = '已保存，如需更换请填新的';
+    if (!detail.open) $('aiSummary').textContent = '更换或删除我的 API Key';
+  } else {
+    const hasBackend = !!backendBase();
+    badge.textContent = '未配置';
+    badge.className = 'ai-badge';
+    status.textContent = hasBackend
+      ? '还没有填自己的密钥 —— 将使用作者的后端（若后端未启动，AI 建议会提示失败）。'
+      : '还没有填密钥。填入你自己的 DeepSeek Key 即可使用 AI 建议。';
+    $('apiKeyInput').placeholder = 'sk-...';
+    $('aiSummary').textContent = '填写我自己的 DeepSeek API Key';
+  }
+}
+
+/* 用最小代价验证密钥：直接发一句极短的请求 */
+async function testApiKey(key) {
+  const res = await fetch(DEEPSEEK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [{ role: 'user', content: '回复"ok"两个字' }],
+      stream: false,
+      max_tokens: 8
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(friendlyAIError(res.status, body));
+  }
+  return true;
+}
+
 /* ════════════ 功能总览 ════════════
    作品集里第一眼要能看清"这工具能做什么"，
    所以把六项能力做成可点击的概览，点了直接跳到对应功能区。 */
@@ -577,6 +686,43 @@ function bind() {
     renderRecs();
   });
 
+  /* ── AI 设置：保存 / 删除密钥 ── */
+  $('saveKeyBtn').addEventListener('click', async () => {
+    const raw = $('apiKeyInput').value.trim();
+    const msg = $('keyMsg');
+    if (!raw) { msg.textContent = '请先粘贴你的 API Key'; return; }
+    if (!looksLikeKey(raw)) {
+      msg.textContent = '格式看起来不对 —— DeepSeek 的 Key 以 sk- 开头，长度通常 30 位以上';
+      return;
+    }
+    const btn = $('saveKeyBtn');
+    btn.disabled = true;
+    btn.textContent = '正在测试…';
+    msg.textContent = '';
+    try {
+      await testApiKey(raw);
+      setApiKey(raw);
+      renderAISettings();
+      msg.style.color = 'var(--good)';
+      msg.textContent = '密钥有效，已保存在你的浏览器里。';
+      toast('AI 密钥已保存');
+    } catch (err) {
+      msg.style.color = 'var(--danger)';
+      msg.textContent = '测试失败：' + err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '保存并测试';
+    }
+  });
+
+  $('clearKeyBtn').addEventListener('click', () => {
+    clearApiKey();
+    renderAISettings();
+    $('keyMsg').style.color = 'var(--muted)';
+    $('keyMsg').textContent = '已删除本地保存的密钥。';
+    toast('已删除密钥');
+  });
+
   /* ── 分栏折叠 ── */
   $('recList').addEventListener('click', (e) => {
     const t = e.target.closest('.sect-toggle');
@@ -783,6 +929,7 @@ function bind() {
 /* ── 启动 ── */
 (async function main() {
   bind();
+  renderAISettings();
   renderFeatures();
   renderHistory();
   renderFavorites();

@@ -618,6 +618,23 @@ select {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ── AI 设置 ── */
+.ai-badge {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: #eef2ef;
+  color: var(--muted);
+}
+.ai-badge.ok { background: var(--good-bg); color: var(--good); }
+#aiDetail { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 11px; }
+#aiSummary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--brand); }
+.ai-form { margin-top: 12px; }
+.key-notes { margin: 10px 0 0; padding-left: 18px; }
+.key-notes li { margin-bottom: 5px; line-height: 1.6; }
+
 /* ── 功能总览 ── */
 .feat-grid {
   display: grid;

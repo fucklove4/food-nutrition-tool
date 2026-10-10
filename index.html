@@ -68,6 +68,36 @@
     <p class="hint" id="formMsg" role="status"></p>
   </section>
 
+  <!-- ── AI 设置：开源后让用户填自己的密钥 ── -->
+  <section class="card" id="aiCard">
+    <h2><span class="step">🤖</span>AI 建议设置
+      <span class="ai-badge" id="aiBadge">未配置</span>
+    </h2>
+    <p class="small muted" id="aiStatus"></p>
+    <details id="aiDetail">
+      <summary id="aiSummary">填写我自己的 DeepSeek API Key</summary>
+      <div class="ai-form">
+        <div class="field" style="margin-bottom:10px">
+          <label for="apiKeyInput">DeepSeek API Key</label>
+          <input type="password" id="apiKeyInput" placeholder="sk-..."
+                 autocomplete="off" spellcheck="false">
+        </div>
+        <div class="row-2">
+          <button type="button" id="saveKeyBtn" class="primary" style="margin-top:0">保存并测试</button>
+          <button type="button" id="clearKeyBtn" class="ghost" style="margin-top:0">删除密钥</button>
+        </div>
+        <p class="hint" id="keyMsg" role="status"></p>
+        <ul class="small muted key-notes">
+          <li>密钥<b>只保存在你自己的浏览器</b>，请求直接发往 DeepSeek 官方，
+              不经过本工具的任何服务器。</li>
+          <li>没有密钥时，AI 建议会尝试作者的后端；开源部署版本通常不含后端。</li>
+          <li>获取密钥：platform.deepseek.com → API Keys。费用很低（一次建议约 ¥0.0008）。</li>
+          <li>本工具不诊断疾病、不替代医嘱。</li>
+        </ul>
+      </div>
+    </details>
+  </section>
+
   <!-- ── 历史记录 ── -->
   <section class="card hidden" id="historyCard">
     <h2><span class="step">↺</span>历史记录</h2>
